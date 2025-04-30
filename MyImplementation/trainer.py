@@ -1,19 +1,23 @@
 import torch
 import torch.optim as optim
 import torch.nn as nn
+import pandas as pd
 
 from utils import PandasDataset, AverageMeter, constraint_extrapolation_MLP
 from distModel import distModel
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+
 from torch.utils.data import DataLoader
 
 # Define trainer class
 class Trainer():
     torch.manual_seed(1)
-    def __init__(self, X, y, model_config, training_config, device='cpu'):
+    def __init__(self, X, y, model_config, training_config, n_preds=1, device='cpu'):
         self.device = device
         self.X = X
         self.y = y
+        self.n_preds = n_preds
 
         self.model_config = model_config
         self.training_config = training_config
@@ -54,6 +58,26 @@ class Trainer():
             self.X_test = X_test
             self.y_val = y_val
             self.y_test = y_test
+        
+        # scale the data
+        scaler = StandardScaler()
+
+        self.X_train = pd.DataFrame(scaler.fit_transform(self.X_train), columns=scaler.feature_names_in_)
+        self.X_mean = scaler.mean_
+        self.X_std = scaler.scale_
+
+        self.X_val = pd.DataFrame(scaler.transform(self.X_val), columns=scaler.feature_names_in_)
+        if create_test:
+            self.X_test = pd.DataFrame(scaler.transform(self.X_test), columns=scaler.feature_names_in_)
+        
+        self.y_train = pd.Series(scaler.fit_transform(self.y_train.values.reshape(-1, 1)).ravel(), name=self.y.name)
+        self.y_mean = scaler.mean_
+        self.y_std = scaler.scale_
+
+        self.y_val = pd.Series(scaler.transform(self.y_val.values.reshape(-1, 1)).ravel(), name=self.y.name)
+        if create_test:
+            self.y_test = pd.Series(scaler.transform(self.y_test.values.reshape(-1, 1)).ravel(), name=self.y.name)
+
     
     def set_data_partitions(self, X_train, y_train, X_val, y_val, X_test=None, y_test=None):
         '''

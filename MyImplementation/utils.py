@@ -3,8 +3,10 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import pandas as pd
+import pyomo.environ as pyo
 
 from torch.utils.data import Dataset
+from pyomo.environ import *
 
 
 np.random.seed(42)
@@ -85,3 +87,73 @@ class PandasDataset(Dataset):
         return x
 
 
+
+def const_embed(model, opt_model, constaints, outcome, n_scenarios = 1, deterministic = False):
+        '''
+        This function embdeds the fitted prediction model within the optimization problem.
+        Expecting a defined optimization model "opt_model", constraint dataframe "constraints",
+        a name for an "outcome", and the number of scenarios to generate.
+        '''
+        
+        # Predefining variable y
+        #opt_model.y = Var(Any, dense=False, domain=Reals)
+        
+        M_l=-1e3
+        M_u=1e3
+        opt_model.v = Var(Any, dense=False, domain=NonNegativeReals)
+        opt_model.v_ind = Var(Any, dense=False, domain=Binary)
+        
+        for n in range(model.n_preds):
+            max_layer = max(constaints['layer'])
+            nodes_input = range(len(model.X_train.columns))
+            v_input = [(opt_model.x[name,n]-model.X_mean[i])/model.X_std[i] for i,name in enumerate(model.X_train.columns)]
+            
+            for l in range(max_layer):
+                df_layer = constaints.query('layer == %d' % l)
+                max_nodes = [k for k in df_layer.columns if 'node_' in k]
+                # coeffs_layer = np.array(df_layer.iloc[:, range(len(max_nodes))].dropna(axis=1))
+                coeffs_layer = np.array(df_layer.loc[:, max_nodes].dropna(axis=1))
+                intercepts_layer = np.array(df_layer['intercept'])
+                nodes = df_layer['node']
+                
+                if l == max_layer-1:
+                    node = nodes.iloc[0] 
+                    opt_model.add_component('Mean_est' + str(n), Constraint(rule=opt_model.y[outcome, n,'mean'] == (sum(v_input[i] * coeffs_layer[node, i] for i in nodes_input) + intercepts_layer[node])))
+                    
+                    l = l+1
+                    df_layer = constaints.query('layer == %d' % l)
+                    max_nodes = [k for k in df_layer.columns if 'node_' in k]
+                    coeffs_layer = np.array(df_layer.loc[:, max_nodes].dropna(axis=1))
+                    intercepts_layer = np.array(df_layer['intercept'])
+                    opt_model.add_component('Var_est' + str(n), Constraint(rule=opt_model.y[outcome, n,'sd'] == (sum(v_input[i] * coeffs_layer[node, i] for i in nodes_input) + intercepts_layer[node])))
+                    
+                else:
+                    # Save v_pos for input to next layer
+                    v_pos_list = []
+                    for node in nodes:
+                        ## Initialize variables
+                        v_pos_list.append(opt_model.v[(outcome, l, node, n)])
+                        opt_model.add_component('constraint_1_layer' + str(l) + '_node' + str(node)+ '_pred'+ str(n)+ outcome,
+                                            Constraint(rule=opt_model.v[(outcome, l, node, n)] >= sum(v_input[i] * coeffs_layer[node, i] for i in nodes_input) + intercepts_layer[node]))
+                        opt_model.add_component('constraint_2_layer' + str(l) + '_node' + str(node)+ '_pred'+ str(n)+ outcome,
+                                            Constraint(rule=opt_model.v[(outcome, l, node, n)] <= M_u * (opt_model.v_ind[(outcome, l, node, n)])))
+                        opt_model.add_component('constraint_3_layer' + str(l) + '_node' + str(node)+ '_pred'+ str(n)+ outcome,
+                                            Constraint(rule=opt_model.v[(outcome, l, node, n)] <= sum(v_input[i] * coeffs_layer[node, i] for i in nodes_input) + intercepts_layer[node] - M_l * (1 - opt_model.v_ind[(outcome, l, node, n)])))
+                    ## Prepare nodes_input for next layer
+                    nodes_input = nodes
+                    v_input = v_pos_list
+        
+        
+        if deterministic == False:
+            np.random.seed(0)
+            z_vals = np.random.normal(size=n_scenarios)
+            
+            for n in range(model.n_preds):
+                for w in range(1, n_scenarios + 1):
+                    # opt_model.y[outcome, n,'sd'] and opt_model.y[outcome, n,'mean'] are already defined in the model as learned variables above. Samples from standard normal distribution are added to the mean and sd of the prediction.
+                    # The mean and sd are scaled to the original scale of the data using self.y_std and self.y_mean.
+                    opt_model.add_component(outcome + '_pred' + str(n) + '_sce' + str(w), Constraint(rule=opt_model.y[outcome, n, w] == (z_vals[w-1] * opt_model.y[outcome, n,'sd'] + opt_model.y[outcome, n,'mean'])*model.y_std + model.y_mean))
+        else:
+            for n in range(model.n_preds):
+                for w in range(1, n_scenarios + 1):
+                    opt_model.add_component(outcome + '_pred' + str(n) + '_sce' + str(w), Constraint(rule=opt_model.y[outcome, n, w] == opt_model.y[outcome, n,'mean']*model.y_std + model.y_mean))
