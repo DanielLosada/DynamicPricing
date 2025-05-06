@@ -110,6 +110,8 @@ class Trainer():
         val_dl = DataLoader(val_ds, batch_size=len(val_ds)) # self.training_config['batchsize']?
 
         iters = self.training_config['iters']
+        patience = self.training_config.get('patience', 10)
+        no_improvement = 0
         # Define optimizer: https://pytorch.org/docs/stable/generated/torch.optim.Adam.html
         optimizer = optim.Adam(self.model.parameters(), lr = self.training_config['lr'], weight_decay=self.training_config['wd'])
 
@@ -141,10 +143,19 @@ class Trainer():
                     self.val_loss.update(loss.item(), x.size(0))
 
             if self.val_loss.avg < best_loss:
+                print(f'Validation loss improved from {best_loss:.4f} to {self.val_loss.avg:.4f} in epoch {epoch+1}. Saving model...')
+                no_improvement = 0
                 best_loss = self.val_loss.avg
+                #self.best_model = self.model.state_dict() # copy.deepcopy(self.model.state_dict())
                 torch.save(self.model.state_dict(), 'best_model.pth')
-
-            print(f'Epoch {epoch+1}/{iters} - Train Loss: {self.train_loss.avg:.4f}, Val Loss: {self.val_loss.avg:.4f}')
+            else:
+                no_improvement += 1
+                if no_improvement >= patience:
+                    print(f"Early stopping triggered after {epoch+1} epochs.")
+                    break
+            if epoch % 10 == 0:
+                print(f'Epoch {epoch+1}/{iters} - Train Loss: {self.train_loss.avg:.4f}, Val Loss: {self.val_loss.avg:.4f}')
+        self.model.load_state_dict(torch.load('best_model.pth'))
 
     def test(self):
         test_ds = PandasDataset(self.X_test, self.y_test)
@@ -186,6 +197,7 @@ class Trainer():
         return mean_pred, sd_pred
     
     def constraint_build(self):
+        self.model.load_state_dict(torch.load('best_model.pth'))
         weight_names = []
         weight_values = []
         bias_names = []
