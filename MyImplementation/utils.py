@@ -1,0 +1,159 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+import pandas as pd
+import pyomo.environ as pyo
+
+from torch.utils.data import Dataset
+from pyomo.environ import *
+
+
+np.random.seed(42)
+torch.manual_seed(1)
+
+def generate_simple_synthetic_data(n_samples=1000, seed=42):
+        np.random.seed(seed)
+
+        # Contextual features
+        x1 = np.random.uniform(0, 1, size=n_samples)   # e.g., income level normalized [0, 1]
+        x2 = np.random.uniform(0, 1, size=n_samples)   # e.g., brand loyalty normalized [0, 1]
+
+        # Price feature (higher price usually decreases demand)
+        price = np.random.uniform(1, 10, size=n_samples)  # price between $1 and $10
+
+        # Define true mean (nonlinear relationship)
+        true_mean = (5 * x1 + 3 * x2) / (1 + 0.5 * price)  # demand decreases with higher price
+
+        # Define true std (slightly depends on features)
+        true_std = 0.2 + 0.3 * np.abs(x1 - x2) + 0.05 * (price / 10)  # more price variation adds more noise
+
+        # Sample y from N(mean, std)
+        y = np.random.normal(loc=true_mean, scale=true_std)
+
+        # Package into dataframe
+        X = pd.DataFrame({'x1': x1, 'x2': x2, 'price': price})
+        y = pd.Series(y, name='y')
+
+        return X, y, true_mean, true_std
+
+def extract_layer(weight, bias, l):
+        df_sub = pd.DataFrame(weight[l]).add_prefix('node_')
+        df_sub['intercept'] = bias[l]
+        df_sub['layer'] = l
+        df_sub['node'] = range(len(df_sub))
+        return df_sub
+
+def constraint_extrapolation_MLP(weight, bias, names):
+    n_layers = len(names)
+    constraints = pd.concat([extract_layer(weight, bias, l) for l in range(n_layers)],axis=0)
+    cols_to_move = ['intercept', 'layer', 'node']
+    constraints = constraints[cols_to_move + [col for col in constraints.columns if col not in cols_to_move]]
+    return constraints
+
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+class PandasDataset(Dataset):
+    def __init__(self, X, y=None, transform=None):
+        self.X = X.values if isinstance(X, pd.DataFrame) else X
+        self.y = y.values if isinstance(y, pd.Series) else y
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.X)
+
+    def __getitem__(self, idx):
+        x = torch.tensor(self.X[idx], dtype=torch.float32)
+        if self.transform:
+            x = self.transform(x)
+        if self.y is not None:
+            y = torch.tensor(self.y[idx], dtype=torch.float32)
+            return x, y
+        return x
+
+
+
+def const_embed(model, opt_model, constaints, outcome, n_scenarios = 1, deterministic = False):
+        '''
+        This function embdeds the fitted prediction model within the optimization problem.
+        Expecting a defined optimization model "opt_model", constraint dataframe "constraints",
+        a name for an "outcome", and the number of scenarios to generate.
+        '''
+        
+        # Predefining variable y
+        #opt_model.y = Var(Any, dense=False, domain=Reals)
+        
+        M_l=-1e3
+        M_u=1e3
+        opt_model.v = Var(Any, dense=False, domain=NonNegativeReals)
+        opt_model.v_ind = Var(Any, dense=False, domain=Binary)
+        
+        for n in range(model.n_preds):
+            max_layer = max(constaints['layer'])
+            nodes_input = range(len(model.X_train.columns))
+            v_input = [(opt_model.x[name,n]-model.X_mean[i])/model.X_std[i] for i,name in enumerate(model.X_train.columns)]
+            
+            for l in range(max_layer):
+                df_layer = constaints.query('layer == %d' % l)
+                max_nodes = [k for k in df_layer.columns if 'node_' in k]
+                # coeffs_layer = np.array(df_layer.iloc[:, range(len(max_nodes))].dropna(axis=1))
+                coeffs_layer = np.array(df_layer.loc[:, max_nodes].dropna(axis=1))
+                intercepts_layer = np.array(df_layer['intercept'])
+                nodes = df_layer['node']
+                
+                if l == max_layer-1:
+                    node = nodes.iloc[0] 
+                    opt_model.add_component('Mean_est' + str(n), Constraint(rule=opt_model.y[outcome, n,'mean'] == (sum(v_input[i] * coeffs_layer[node, i] for i in nodes_input) + intercepts_layer[node])))
+                    
+                    l = l+1
+                    df_layer = constaints.query('layer == %d' % l)
+                    max_nodes = [k for k in df_layer.columns if 'node_' in k]
+                    coeffs_layer = np.array(df_layer.loc[:, max_nodes].dropna(axis=1))
+                    intercepts_layer = np.array(df_layer['intercept'])
+                    opt_model.add_component('Var_est' + str(n), Constraint(rule=opt_model.y[outcome, n,'sd'] == (sum(v_input[i] * coeffs_layer[node, i] for i in nodes_input) + intercepts_layer[node])))
+                    
+                else:
+                    # Save v_pos for input to next layer
+                    v_pos_list = []
+                    for node in nodes:
+                        ## Initialize variables
+                        v_pos_list.append(opt_model.v[(outcome, l, node, n)])
+                        opt_model.add_component('constraint_1_layer' + str(l) + '_node' + str(node)+ '_pred'+ str(n)+ outcome,
+                                            Constraint(rule=opt_model.v[(outcome, l, node, n)] >= sum(v_input[i] * coeffs_layer[node, i] for i in nodes_input) + intercepts_layer[node]))
+                        opt_model.add_component('constraint_2_layer' + str(l) + '_node' + str(node)+ '_pred'+ str(n)+ outcome,
+                                            Constraint(rule=opt_model.v[(outcome, l, node, n)] <= M_u * (opt_model.v_ind[(outcome, l, node, n)])))
+                        opt_model.add_component('constraint_3_layer' + str(l) + '_node' + str(node)+ '_pred'+ str(n)+ outcome,
+                                            Constraint(rule=opt_model.v[(outcome, l, node, n)] <= sum(v_input[i] * coeffs_layer[node, i] for i in nodes_input) + intercepts_layer[node] - M_l * (1 - opt_model.v_ind[(outcome, l, node, n)])))
+                    ## Prepare nodes_input for next layer
+                    nodes_input = nodes
+                    v_input = v_pos_list
+        
+        
+        if deterministic == False:
+            np.random.seed(0)
+            z_vals = np.random.normal(size=n_scenarios)
+            
+            for n in range(model.n_preds):
+                for w in range(1, n_scenarios + 1):
+                    # opt_model.y[outcome, n,'sd'] and opt_model.y[outcome, n,'mean'] are already defined in the model as learned variables above. Samples from standard normal distribution are added to the mean and sd of the prediction.
+                    # The mean and sd are scaled to the original scale of the data using self.y_std and self.y_mean.
+                    opt_model.add_component(outcome + '_pred' + str(n) + '_sce' + str(w), Constraint(rule=opt_model.y[outcome, n, w] == (z_vals[w-1] * opt_model.y[outcome, n,'sd'] + opt_model.y[outcome, n,'mean'])*model.y_std + model.y_mean))
+        else:
+            for n in range(model.n_preds):
+                for w in range(1, n_scenarios + 1):
+                    opt_model.add_component(outcome + '_pred' + str(n) + '_sce' + str(w), Constraint(rule=opt_model.y[outcome, n, w] == opt_model.y[outcome, n,'mean']*model.y_std + model.y_mean))

@@ -162,6 +162,8 @@ class distcl(object):
             
             for n in range(self.n_preds):
                 for w in range(1, n_scenarios + 1):
+                    # opt_model.y[outcome, n,'sd'] and opt_model.y[outcome, n,'mean'] are already defined in the model as learned variables above. Samples from standard normal distribution are added to the mean and sd of the prediction.
+                    # The mean and sd are scaled to the original scale of the data using self.y_std and self.y_mean.
                     opt_model.add_component(outcome + '_pred' + str(n) + '_sce' + str(w), Constraint(rule=opt_model.y[outcome, n, w] == (z_vals[w-1] * opt_model.y[outcome, n,'sd'] + opt_model.y[outcome, n,'mean'])*self.y_std + self.y_mean))
         else:
             for n in range(self.n_preds):
