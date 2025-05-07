@@ -1,7 +1,11 @@
 import torch
+import os
+
 import torch.optim as optim
 import torch.nn as nn
 import pandas as pd
+import matplotlib.pyplot as plt
+import scipy.stats as stats
 
 from utils import PandasDataset, AverageMeter, constraint_extrapolation_MLP
 from distModel import distModel
@@ -214,3 +218,105 @@ class Trainer():
         
         return constraints
     
+    def evaluate_gaussian_nll(self):
+        """
+        Evaluates the Gaussian NLL loss for a model and a baseline that assumes all outputs
+        come from a single Gaussian with mean and std estimated from the training set.
+
+        Args:
+            
+            device: Torch device ('cpu' or 'cuda') to perform evaluation on.
+
+        Returns:
+            A tuple (baseline_loss_value, model_loss_value)
+        """
+        # Convert training targets to tensor
+        y_train_tensor = torch.tensor(self.y_train.values, dtype=torch.float32).unsqueeze(1).to(self.device)
+        
+        # Compute baseline mean and std from training targets
+        baseline_mean = torch.mean(y_train_tensor)
+        baseline_std = torch.std(y_train_tensor) + 1e-6  # add small epsilon to avoid zero variance
+
+        # Define loss criterion
+        criterion = nn.GaussianNLLLoss()
+
+        # Evaluate baseline loss on validation targets
+        y_val_tensor = torch.tensor(self.y_val.values, dtype=torch.float32).unsqueeze(1).to(self.device)
+        baseline_mean_val = baseline_mean.repeat(y_val_tensor.shape[0], 1)
+        baseline_var_val = (baseline_std ** 2).repeat(y_val_tensor.shape[0], 1)
+        baseline_loss = criterion(baseline_mean_val, y_val_tensor, baseline_var_val)
+
+        # Predict mean and std using the model
+        pred_mean, pred_sd = self.predict(self.X_val, return_tensor=True)
+        pred_mean, pred_sd = pred_mean.to(self.device), pred_sd.to(self.device)
+        pred_var = pred_sd ** 2
+
+        # Evaluate model loss
+        model_loss = criterion(pred_mean, y_val_tensor, pred_var)
+
+        print(f"Baseline Gaussian NLL Loss: {baseline_loss.item():.4f}")
+        print(f"Model Gaussian NLL Loss: {model_loss.item():.4f}")
+
+        return baseline_loss.item(), model_loss.item()
+    
+    def evaluate_standardized_residuals(self, output_dir="residual_diagnostics", prefix=""):
+        """
+        Evaluates standardized residuals by plotting histogram, QQ-plot,
+        and performing a KS test against the standard normal distribution.
+
+        Args:
+            output_dir (str): Directory to save images.
+            prefix (str): Optional prefix for filenames
+
+        Returns:
+            ks_stat (float): KS test statistic
+            p_value (float): KS test p-value
+        """
+        y_val_tensor = torch.tensor(self.y_val.values, dtype=torch.float32).unsqueeze(1).to(self.device)
+        pred_mean, pred_sd = self.predict(self.X_val, return_tensor=True)
+        pred_mean, pred_sd = pred_mean.to(self.device), pred_sd.to(self.device)
+        pred_var = pred_sd ** 2
+
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Compute standardized residuals
+        z = (y_val_tensor - pred_mean) / pred_sd
+        z_np = z.squeeze().detach().cpu().numpy()
+
+        # === Histogram ===
+        plt.figure()
+        plt.hist(z_np, bins=30, density=True, alpha=0.6, label='Standardized Residuals (Z-scores)')
+        
+        x = torch.linspace(-5, 5, 1000).numpy()
+        plt.plot(x, stats.norm.pdf(x), 'k--', label='Standard Normal')
+        plt.title("Histogram of Standardized Residuals")
+        plt.xlabel("Z-score")
+        plt.ylabel("Density")
+        plt.legend()
+        plt.grid(True)
+        hist_path = os.path.join(output_dir, f"{prefix}z_histogram.png")
+        plt.savefig(hist_path)
+        plt.close()
+
+        # === QQ-Plot ===
+        plt.figure()
+        stats.probplot(z_np, dist="norm", plot=plt)
+        plt.title("QQ-Plot of Standardized Residuals")
+        qq_path = os.path.join(output_dir, f"{prefix}z_qqplot.png")
+        plt.savefig(qq_path)
+        plt.close()
+
+        # === KS Test ===
+        ks_stat, p_value = stats.kstest(z_np, 'norm')
+
+        print(f"KS test against N(0,1): statistic = {ks_stat:.4f}, p-value = {p_value:.4f}")
+        if p_value > 0.05:
+            print("✅ The standardized residuals do not significantly differ from a standard normal distribution — model variance estimates appear well-calibrated.")
+        else:
+            print("⚠️ The standardized residuals significantly differ from a standard normal distribution — model variance estimates may be miscalibrated.")
+
+        print(f"Saved: {hist_path}")
+        print(f"Saved: {qq_path}")
+
+        return ks_stat, p_value
+        
