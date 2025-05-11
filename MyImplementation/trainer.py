@@ -17,17 +17,16 @@ from torch.utils.data import DataLoader
 # Define trainer class
 class Trainer():
     torch.manual_seed(1)
-    def __init__(self, X, y, model_config, training_config, n_preds=1, device='cpu'):
+    def __init__(self, X, y, config, n_preds=1, device='cpu'):
         self.device = device
         self.X = X
         self.y = y
         self.n_preds = n_preds
 
-        self.model_config = model_config
-        self.training_config = training_config
+        self.config = config
 
         # Definde the model
-        self.model = distModel(input_size=self.X.shape[1], hidden_layers=self.model_config['hidden_layers'], hidden_size=self.model_config['hidden_size'], drop=self.model_config['drop']).to(self.device)
+        self.model = distModel(input_size=self.X.shape[1], hidden_layers=self.config['hidden_layers'], hidden_size=self.config['hidden_size'], drop=self.config['drop']).to(self.device)
 
         # Define criterion: https://pytorch.org/docs/stable/generated/torch.nn.GaussianNLLLoss.html
         self.criterion = nn.GaussianNLLLoss()
@@ -110,14 +109,14 @@ class Trainer():
         train_ds = PandasDataset(self.X_train, self.y_train)
         val_ds = PandasDataset(self.X_val, self.y_val)
         
-        train_dl = DataLoader(train_ds, batch_size = self.training_config['batchsize'], shuffle=True)
-        val_dl = DataLoader(val_ds, batch_size=len(val_ds)) # self.training_config['batchsize']?
+        train_dl = DataLoader(train_ds, batch_size = self.config['batchsize'], shuffle=True)
+        val_dl = DataLoader(val_ds, batch_size=len(val_ds)) # self.config['batchsize']?
 
-        iters = self.training_config['iters']
-        patience = self.training_config.get('patience', 10)
+        iters = self.config['iters']
+        patience = self.config.get('patience', 10)
         no_improvement = 0
         # Define optimizer: https://pytorch.org/docs/stable/generated/torch.optim.Adam.html
-        optimizer = optim.Adam(self.model.parameters(), lr = self.training_config['lr'], weight_decay=self.training_config['wd'])
+        optimizer = optim.Adam(self.model.parameters(), lr = self.config['lr'], weight_decay=self.config['wd'])
 
         best_loss = float('inf')
         for epoch in range(iters):
@@ -161,9 +160,11 @@ class Trainer():
                 print(f'Epoch {epoch+1}/{iters} - Train Loss: {self.train_loss.avg:.4f}, Val Loss: {self.val_loss.avg:.4f}')
         self.model.load_state_dict(torch.load('best_model.pth'))
 
+        return best_loss
+
     def test(self):
         test_ds = PandasDataset(self.X_test, self.y_test)
-        test_dl = DataLoader(test_ds, batch_size=len(test_ds)) # self.training_config['batchsize']?
+        test_dl = DataLoader(test_ds, batch_size=len(test_ds)) # self.config['batchsize']?
 
         self.model.load_state_dict(torch.load('best_model.pth'))
         self.model.eval()
@@ -184,7 +185,7 @@ class Trainer():
         self.model.eval()
 
         pred_ds = PandasDataset(X)
-        pred_dl = DataLoader(pred_ds, batch_size=len(pred_ds)) # self.training_config['batchsize']?
+        pred_dl = DataLoader(pred_ds, batch_size=len(pred_ds)) # self.config['batchsize']?
 
         with torch.no_grad():
             for i, x in enumerate(pred_dl):
