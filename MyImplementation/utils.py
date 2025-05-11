@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import pandas as pd
-import pyomo.environ as pyo
 
 from torch.utils.data import Dataset
 from pyomo.environ import *
