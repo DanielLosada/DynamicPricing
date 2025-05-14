@@ -17,11 +17,12 @@ from torch.utils.data import DataLoader
 # Define trainer class
 class Trainer():
     torch.manual_seed(1)
-    def __init__(self, X, y, config, n_preds=1, device='cpu'):
+    def __init__(self, X, y, config, n_preds=1, device='cpu', path_model="./models/best_model.pth"):
         self.device = device
         self.X = X
         self.y = y
         self.n_preds = n_preds
+        self.path_model = path_model
 
         self.config = config
 
@@ -150,7 +151,7 @@ class Trainer():
                 no_improvement = 0
                 best_loss = self.val_loss.avg
                 #self.best_model = self.model.state_dict() # copy.deepcopy(self.model.state_dict())
-                torch.save(self.model.state_dict(), 'best_model.pth')
+                torch.save(self.model.state_dict(), self.path_model)
             else:
                 no_improvement += 1
                 if no_improvement >= patience:
@@ -158,7 +159,7 @@ class Trainer():
                     break
             if epoch % 10 == 0:
                 print(f'Epoch {epoch+1}/{iters} - Train Loss: {self.train_loss.avg:.4f}, Val Loss: {self.val_loss.avg:.4f}')
-        self.model.load_state_dict(torch.load('best_model.pth'))
+        self.model.load_state_dict(torch.load(self.path_model))
 
         return best_loss
 
@@ -166,7 +167,7 @@ class Trainer():
         test_ds = PandasDataset(self.X_test, self.y_test)
         test_dl = DataLoader(test_ds, batch_size=len(test_ds)) # self.config['batchsize']?
 
-        self.model.load_state_dict(torch.load('best_model.pth'))
+        self.model.load_state_dict(torch.load(self.path_model))
         self.model.eval()
 
         ## Testing
@@ -181,7 +182,7 @@ class Trainer():
         print(f'Test Loss: {test_loss.avg:.4f}')
     
     def predict(self, X, return_tensor=False):
-        self.model.load_state_dict(torch.load('best_model.pth'))
+        self.model.load_state_dict(torch.load(self.path_model))
         self.model.eval()
 
         pred_ds = PandasDataset(X)
@@ -202,7 +203,7 @@ class Trainer():
         return mean_pred, sd_pred
     
     def constraint_build(self):
-        self.model.load_state_dict(torch.load('best_model.pth'))
+        self.model.load_state_dict(torch.load(self.path_model))
         weight_names = []
         weight_values = []
         bias_names = []
