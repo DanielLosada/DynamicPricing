@@ -181,7 +181,7 @@ class Trainer():
         
         print(f'Test Loss: {test_loss.avg:.4f}')
     
-    def predict(self, X, return_tensor=False):
+    def predict(self, X, return_tensor=False, unscale=False):
         self.model.load_state_dict(torch.load(self.path_model))
         self.model.eval()
 
@@ -199,6 +199,10 @@ class Trainer():
             else:
                 mean_pred = mean.detach().cpu().numpy()
                 sd_pred = sd.detach().cpu().numpy()
+            
+            if unscale:
+                mean_pred = mean_pred * self.y_std + self.y_mean
+                sd_pred = sd_pred * self.y_std
         
         return mean_pred, sd_pred
     

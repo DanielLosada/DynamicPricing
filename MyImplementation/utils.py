@@ -11,6 +11,18 @@ from pyomo.environ import *
 np.random.seed(42)
 torch.manual_seed(1)
 
+def load_case_study_data():
+    data = pd.read_csv('../DistCL_code/data_house_japan/data_clean.csv', index_col=0)
+    data.index = pd.to_datetime(data.index)
+
+    y = data['demand']
+    X = data.drop(['demand'], axis=1, inplace=False)
+
+    val_ind = X.index[(X.index >= pd.to_datetime('2018-11-01')) & (X.index < pd.to_datetime('2018-12-01'))]
+    test_ind = X.index[X.index >= pd.to_datetime('2018-12-01')]
+
+    return X, y, val_ind, test_ind
+
 def generate_simple_synthetic_data(n_samples=1000, seed=42):
         np.random.seed(seed)
 
