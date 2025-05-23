@@ -23,7 +23,7 @@ def load_case_study_data():
 
     return X, y, val_ind, test_ind
 
-def generate_simple_synthetic_data(n_samples=1000, seed=42):
+'''def generate_simple_synthetic_data(n_samples=1000, seed=42):
         np.random.seed(seed)
 
         # Contextual features
@@ -46,7 +46,99 @@ def generate_simple_synthetic_data(n_samples=1000, seed=42):
         X = pd.DataFrame({'x1': x1, 'x2': x2, 'price': price})
         y = pd.Series(y, name='y')
 
-        return X, y, true_mean, true_std
+        return X, y, true_mean, true_std'''
+
+def generate_simple_synthetic_data(n_samples=1000, seed=42):
+    np.random.seed(seed)
+
+    # Contextual features
+    x1 = np.random.uniform(0, 1, size=n_samples)   # e.g., income level
+    x2 = np.random.uniform(0, 1, size=n_samples)   # e.g., brand loyalty
+
+    # Price feature (bounded between realistic min and max)
+    price = np.random.uniform(10, 30, size=n_samples)
+
+    # Demand decay using sigmoid centered at mean price 17
+    k = 0.35
+    sigmoid = 1 / (1 + np.exp(k * (price - 17)))
+    valid_price_mask = (price >= 10) & (price <= 30)
+    base_demand = (5 * x1 + 3 * x2) * sigmoid * 2
+
+    true_mean = np.where(valid_price_mask, base_demand, 0)
+
+    # Bell-shaped variability (highest near price 17)
+    std_peak = 1.0
+    std_min = 0.2
+    width = 5
+
+    base_std = std_min + (std_peak - std_min) * np.exp(-((price - 17)**2) / (2 * width**2))
+    true_std = np.where(valid_price_mask, base_std, 0)
+
+    # Sample demand, clip, round
+    y = np.random.normal(loc=true_mean, scale=true_std)
+    y = np.maximum(0, y)
+    #y = np.round(y).astype(int)
+
+    # Package
+    X = pd.DataFrame({'x1': x1, 'x2': x2, 'price': price})
+    y = pd.Series(y, name='y')
+
+    return X, y, true_mean, true_std
+
+def generate_data_by_ids(n_ids=100, n_prices_per_id=10, seed=42):
+    np.random.seed(seed)
+
+    # Create one (x1, x2) pair per ID
+    x1_vals = np.random.uniform(0, 1, size=n_ids)
+    x2_vals = np.random.uniform(0, 1, size=n_ids)
+    ids = np.arange(1, n_ids + 1)
+
+    # Create all combinations of ID and price
+    data = []
+    for i in range(n_ids):
+        id_ = ids[i]
+        x1 = x1_vals[i]
+        x2 = x2_vals[i]
+
+        # Generate n_prices_per_id random prices between 10 and 30
+        prices = np.random.uniform(10, 30, size=n_prices_per_id)
+
+        for price in prices:
+            # Demand decay using sigmoid
+            k = 0.35
+            center = 17
+            sigmoid = 1 / (1 + np.exp(k * (price - center)))
+
+            # Base demand, scaled up
+            raw_demand = (5 * x1 + 3 * x2)
+            base_demand = raw_demand * sigmoid * 2  # scaling factor
+
+            # Mean
+            true_mean = base_demand if 10 <= price <= 30 else 0
+
+            # Std: bell-shaped curve, low at extremes
+            std_peak = 1.0
+            std_min = 0.2
+            width = 5
+            base_std = std_min + (std_peak - std_min) * np.exp(-((price - center) ** 2) / (2 * width ** 2))
+            true_std = base_std if 10 <= price <= 30 else 0
+
+            # Sample demand
+            y = np.random.normal(loc=true_mean, scale=true_std)
+            y = max(0, y)
+
+            data.append({
+                'id': id_,
+                'x1': x1,
+                'x2': x2,
+                'price': price,
+                'true_mean': true_mean,
+                'true_std': true_std,
+                'y': y
+            })
+
+    df = pd.DataFrame(data)
+    return df
 
 def extract_layer(weight, bias, l):
         df_sub = pd.DataFrame(weight[l]).add_prefix('node_')
@@ -93,9 +185,32 @@ class PandasDataset(Dataset):
         if self.transform:
             x = self.transform(x)
         if self.y is not None:
-            y = torch.tensor(self.y[idx], dtype=torch.float32)
+            y = torch.tensor(self.y[idx], dtype=torch.float32).reshape(1)
             return x, y
         return x
+
+class TabularDataset(Dataset):
+    def __init__(self, X, y):
+        """
+        Characterizes a Dataset for PyTorch
+        """
+        
+        self.n = X.shape[0]
+        
+        self.y = y.astype(np.float32).values.reshape(-1, 1)
+        self.X = X.astype(np.float32).values
+    
+    def __len__(self):
+        """
+        Denotes the total number of samples.
+        """
+        return self.n
+    
+    def __getitem__(self, idx):
+        """
+        Generates one sample of data.
+        """
+        return [self.X[idx], self.y[idx]]
 
 
 

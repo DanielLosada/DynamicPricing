@@ -7,7 +7,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import scipy.stats as stats
 
-from utils import PandasDataset, AverageMeter, constraint_extrapolation_MLP
+from utils import PandasDataset, AverageMeter, constraint_extrapolation_MLP, TabularDataset
 from distModel import distModel
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -18,6 +18,8 @@ from torch.utils.data import DataLoader
 class Trainer():
     torch.manual_seed(1)
     def __init__(self, X, y, config, n_preds=1, device='cpu', path_model="./models/best_model.pth"):
+        X = X.reindex(sorted(X.columns), axis=1)
+
         self.device = device
         self.X = X
         self.y = y
@@ -28,7 +30,7 @@ class Trainer():
 
         # Definde the model
         self.model = distModel(input_size=self.X.shape[1], hidden_layers=self.config['hidden_layers'], hidden_size=self.config['hidden_size'], drop=self.config['drop']).to(self.device)
-
+        #self.model = DistFCNN(input_size=self.X.shape[1], output_size=2, hidden_layers=self.config['hidden_layers'], hidden_size=self.config['hidden_size'], drop=self.config['drop']).to(self.device)
         # Define criterion: https://pytorch.org/docs/stable/generated/torch.nn.GaussianNLLLoss.html
         self.criterion = nn.GaussianNLLLoss()
 
@@ -101,14 +103,51 @@ class Trainer():
         self.y_val = y_val
 
         if X_test is not None and y_test is not None:
-            self.X_test = X_test
-            self.y_test = y_test
+                    self.X_test = X_test
+                    self.y_test = y_test
+
+        scaler = StandardScaler()
+        self.X_train = pd.DataFrame(scaler.fit_transform(self.X_train), columns = scaler.feature_names_in_)
+        
+        self.X_mean = scaler.mean_
+        self.X_std = scaler.scale_
+        
+        self.X_val = pd.DataFrame(scaler.transform(self.X_val), columns = scaler.feature_names_in_)
+        if X_test is not None:
+            self.X_test = pd.DataFrame(scaler.transform(self.X_test), columns = scaler.feature_names_in_)
+        
+        self.y_train = pd.DataFrame(scaler.fit_transform(self.y_train.values.reshape(-1, 1)), columns = [self.y.name])
+        self.y_mean = scaler.mean_
+        self.y_std = scaler.scale_
+        
+        self.y_val = pd.DataFrame(scaler.transform(self.y_val.values.reshape(-1, 1)), columns = [self.y.name])
+        if y_test is not None:
+            self.y_test = pd.DataFrame(scaler.transform(self.y_test.values.reshape(-1, 1)), columns = [self.y.name])
+        
+
             
     def train(self):
         torch.cuda.empty_cache()
 
         train_ds = PandasDataset(self.X_train, self.y_train)
         val_ds = PandasDataset(self.X_val, self.y_val)
+
+        #train_ds = TabularDataset(self.X_train, self.y_train)
+        #val_ds = TabularDataset(self.X_val, self.y_val)
+
+        '''pd_ds = PandasDataset(self.X_train, self.y_train)
+        tab_ds = TabularDataset(self.X_train, self.y_train)
+        pd_x, pd_y = pd_ds[0]
+        tab_x, tab_y = tab_ds[0]
+
+        print("PandasDataset:")
+        print(type(pd_x), pd_x.shape, pd_x.dtype)
+        print(type(pd_y), pd_y.shape, pd_y.dtype)
+
+        print("TabularDataset:")
+        print(type(tab_x), tab_x.shape, tab_x.dtype)
+        print(type(tab_y), tab_y.shape, tab_y.dtype)'''
+
         
         train_dl = DataLoader(train_ds, batch_size = self.config['batchsize'], shuffle=True)
         val_dl = DataLoader(val_ds, batch_size=len(val_ds)) # self.config['batchsize']?
@@ -138,18 +177,18 @@ class Trainer():
 
             ## Validation
             self.model.eval()
-            self.val_loss = AverageMeter()
+            val_loss = AverageMeter()
             with torch.no_grad():
                 for i, (x, y) in enumerate(val_dl):
                     x, y = x.to(self.device), y.to(self.device)
                     mean, sd = self.model(x)
                     loss = self.criterion(mean, y, sd**2)
-                    self.val_loss.update(loss.item(), x.size(0))
+                    val_loss.update(loss.item(), x.size(0))
 
-            if self.val_loss.avg < best_loss:
-                print(f'Validation loss improved from {best_loss:.4f} to {self.val_loss.avg:.4f} in epoch {epoch+1}. Saving model...')
+            if val_loss.avg < best_loss:
+                print(f'Validation loss improved from {best_loss:.4f} to {val_loss.avg:.4f} in epoch {epoch+1}. Saving model...')
                 no_improvement = 0
-                best_loss = self.val_loss.avg
+                best_loss = val_loss.avg
                 #self.best_model = self.model.state_dict() # copy.deepcopy(self.model.state_dict())
                 torch.save(self.model.state_dict(), self.path_model)
             else:
@@ -158,7 +197,7 @@ class Trainer():
                     print(f"Early stopping triggered after {epoch+1} epochs.")
                     break
             if epoch % 10 == 0:
-                print(f'Epoch {epoch+1}/{iters} - Train Loss: {self.train_loss.avg:.4f}, Val Loss: {self.val_loss.avg:.4f}')
+                print(f'Epoch {epoch+1}/{iters} - Train Loss: {self.train_loss.avg:.4f}, Val Loss: {val_loss.avg:.4f}')
         self.model.load_state_dict(torch.load(self.path_model))
 
         return best_loss

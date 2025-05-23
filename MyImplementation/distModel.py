@@ -30,6 +30,8 @@ class distModel(nn.Module):
     def forward(self, x):
         # Define the forward pass
         x = self.relu(self.input_layer(x))
+        #x = self.dropout(x)
+        
         for hidden_layer in self.hidden_layers:
             x = self.relu(hidden_layer(x))
             x = self.dropout(x)
