@@ -17,13 +17,12 @@ from torch.utils.data import DataLoader
 # Define trainer class
 class Trainer():
     torch.manual_seed(1)
-    def __init__(self, X, y, config, n_preds=1, device='cpu', path_model="./models/best_model.pth"):
+    def __init__(self, X, y, config, device='cpu', path_model="./models/best_model.pth"):
         X = X.reindex(sorted(X.columns), axis=1)
 
         self.device = device
         self.X = X
         self.y = y
-        self.n_preds = n_preds
         self.path_model = path_model
 
         self.config = config
@@ -65,24 +64,30 @@ class Trainer():
             self.y_val = y_val
             self.y_test = y_test
         
-        # scale the data
-        scaler = StandardScaler()
-
-        self.X_train = pd.DataFrame(scaler.fit_transform(self.X_train), columns=scaler.feature_names_in_)
-        self.X_mean = scaler.mean_
-        self.X_std = scaler.scale_
-
-        self.X_val = pd.DataFrame(scaler.transform(self.X_val), columns=scaler.feature_names_in_)
+        self.train_indices = X_train.index
+        self.val_indices = X_val.index
         if create_test:
-            self.X_test = pd.DataFrame(scaler.transform(self.X_test), columns=scaler.feature_names_in_)
+            self.test_indices = X_test.index
         
-        self.y_train = pd.Series(scaler.fit_transform(self.y_train.values.reshape(-1, 1)).ravel(), name=self.y.name)
-        self.y_mean = scaler.mean_
-        self.y_std = scaler.scale_
+        # scale the data
+        self.scaler_X = StandardScaler()
 
-        self.y_val = pd.Series(scaler.transform(self.y_val.values.reshape(-1, 1)).ravel(), name=self.y.name)
+        self.X_train = pd.DataFrame(self.scaler_X.fit_transform(self.X_train), columns=self.scaler_X.feature_names_in_)
+        self.X_mean = self.scaler_X.mean_
+        self.X_std = self.scaler_X.scale_
+
+        self.X_val = pd.DataFrame(self.scaler_X.transform(self.X_val), columns=self.scaler_X.feature_names_in_)
         if create_test:
-            self.y_test = pd.Series(scaler.transform(self.y_test.values.reshape(-1, 1)).ravel(), name=self.y.name)
+            self.X_test = pd.DataFrame(self.scaler_X.transform(self.X_test), columns=self.scaler_X.feature_names_in_)
+        
+        self.scaler_y = StandardScaler()
+        self.y_train = pd.Series(self.scaler_y.fit_transform(self.y_train.values.reshape(-1, 1)).ravel(), name=self.y.name)
+        self.y_mean = self.scaler_y.mean_
+        self.y_std = self.scaler_y.scale_
+
+        self.y_val = pd.Series(self.scaler_y.transform(self.y_val.values.reshape(-1, 1)).ravel(), name=self.y.name)
+        if create_test:
+            self.y_test = pd.Series(self.scaler_y.transform(self.y_test.values.reshape(-1, 1)).ravel(), name=self.y.name)
 
     
     def set_data_partitions(self, X_train, y_train, X_val, y_val, X_test=None, y_test=None):
@@ -220,10 +225,14 @@ class Trainer():
         
         print(f'Test Loss: {test_loss.avg:.4f}')
     
-    def predict(self, X, return_tensor=False, unscale=False):
+    def predict(self, X, return_tensor=False, unscale=False, scale_data=False):
         self.model.load_state_dict(torch.load(self.path_model))
         self.model.eval()
 
+        if scale_data:
+            print("Scaling data...")
+            X = pd.DataFrame(self.scaler_X.transform(X), columns=self.scaler_X.feature_names_in_)
+        
         pred_ds = PandasDataset(X)
         pred_dl = DataLoader(pred_ds, batch_size=len(pred_ds)) # self.config['batchsize']?
 

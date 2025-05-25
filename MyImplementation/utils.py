@@ -214,7 +214,7 @@ class TabularDataset(Dataset):
 
 
 
-def const_embed(model, opt_model, constaints, outcome, n_scenarios = 1, deterministic = False):
+def const_embed(model, opt_model, constaints, outcome, n_scenarios = 1, n_preds=1, deterministic = False):
         '''
         This function embdeds the fitted prediction model within the optimization problem.
         Expecting a defined optimization model "opt_model", constraint dataframe "constraints",
@@ -229,11 +229,12 @@ def const_embed(model, opt_model, constaints, outcome, n_scenarios = 1, determin
         opt_model.v = Var(Any, dense=False, domain=NonNegativeReals)
         opt_model.v_ind = Var(Any, dense=False, domain=Binary)
         
-        for n in range(model.n_preds):
+        for n in range(n_preds):
             max_layer = max(constaints['layer'])
             nodes_input = range(len(model.X_train.columns))
-            v_input = [(opt_model.x[name,n]-model.X_mean[i])/model.X_std[i] for i,name in enumerate(model.X_train.columns)]
-            
+            v_input = [(opt_model.x[name,n]-model.X_mean[i])/model.X_std[i] for i,name in enumerate(model.X_train.columns)] # If data is not scaled
+            #v_input = [opt_model.x[name, n] for name in model.X_train.columns] # If data is scaled
+
             for l in range(max_layer):
                 df_layer = constaints.query('layer == %d' % l)
                 max_nodes = [k for k in df_layer.columns if 'node_' in k]
@@ -274,12 +275,12 @@ def const_embed(model, opt_model, constaints, outcome, n_scenarios = 1, determin
             np.random.seed(0)
             z_vals = np.random.normal(size=n_scenarios)
             
-            for n in range(model.n_preds):
+            for n in range(n_preds):
                 for w in range(1, n_scenarios + 1):
                     # opt_model.y[outcome, n,'sd'] and opt_model.y[outcome, n,'mean'] are already defined in the model as learned variables above. Samples from standard normal distribution are added to the mean and sd of the prediction.
                     # The mean and sd are scaled to the original scale of the data using self.y_std and self.y_mean.
                     opt_model.add_component(outcome + '_pred' + str(n) + '_sce' + str(w), Constraint(rule=opt_model.y[outcome, n, w] == (z_vals[w-1] * opt_model.y[outcome, n,'sd'] + opt_model.y[outcome, n,'mean'])*model.y_std + model.y_mean))
         else:
-            for n in range(model.n_preds):
+            for n in range(n_preds):
                 for w in range(1, n_scenarios + 1):
                     opt_model.add_component(outcome + '_pred' + str(n) + '_sce' + str(w), Constraint(rule=opt_model.y[outcome, n, w] == opt_model.y[outcome, n,'mean']*model.y_std + model.y_mean))
