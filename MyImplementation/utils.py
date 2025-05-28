@@ -85,7 +85,7 @@ def generate_simple_synthetic_data(n_samples=1000, seed=42):
 
     return X, y, true_mean, true_std
 
-def generate_data_by_ids(n_ids=100, n_prices_per_id=10, seed=42):
+def generate_data_by_ids(n_ids=100, n_prices_per_id=10, seed=42, k=0.35):
     np.random.seed(seed)
 
     # Create one (x1, x2) pair per ID
@@ -105,7 +105,6 @@ def generate_data_by_ids(n_ids=100, n_prices_per_id=10, seed=42):
 
         for price in prices:
             # Demand decay using sigmoid
-            k = 0.35
             center = 17
             sigmoid = 1 / (1 + np.exp(k * (price - center)))
 

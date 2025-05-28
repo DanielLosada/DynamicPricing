@@ -6,6 +6,7 @@ import torch.nn as nn
 import pandas as pd
 import matplotlib.pyplot as plt
 import scipy.stats as stats
+import numpy as np
 
 from utils import PandasDataset, AverageMeter, constraint_extrapolation_MLP, TabularDataset
 from distModel import distModel
@@ -17,7 +18,7 @@ from torch.utils.data import DataLoader
 # Define trainer class
 class Trainer():
     torch.manual_seed(1)
-    def __init__(self, X, y, config, device='cpu', path_model="./models/best_model.pth"):
+    def __init__(self, X, y, config, device='cpu', path_model="./models/best_model.pth", id_col=None):
         X = X.reindex(sorted(X.columns), axis=1)
 
         self.device = device
@@ -28,7 +29,11 @@ class Trainer():
         self.config = config
 
         # Definde the model
-        self.model = distModel(input_size=self.X.shape[1], hidden_layers=self.config['hidden_layers'], hidden_size=self.config['hidden_size'], drop=self.config['drop']).to(self.device)
+        if id_col is not None:
+            self.id_col = id_col
+            self.model = distModel(input_size=self.X.shape[1] -1, hidden_layers=self.config['hidden_layers'], hidden_size=self.config['hidden_size'], drop=self.config['drop']).to(self.device)
+        else:
+            self.model = distModel(input_size=self.X.shape[1], hidden_layers=self.config['hidden_layers'], hidden_size=self.config['hidden_size'], drop=self.config['drop']).to(self.device)
         #self.model = DistFCNN(input_size=self.X.shape[1], output_size=2, hidden_layers=self.config['hidden_layers'], hidden_size=self.config['hidden_size'], drop=self.config['drop']).to(self.device)
         # Define criterion: https://pytorch.org/docs/stable/generated/torch.nn.GaussianNLLLoss.html
         self.criterion = nn.GaussianNLLLoss()
@@ -89,7 +94,53 @@ class Trainer():
         if create_test:
             self.y_test = pd.Series(self.scaler_y.transform(self.y_test.values.reshape(-1, 1)).ravel(), name=self.y.name)
 
-    
+    def create_data_partitions_by_id(self, create_test=True, test_size=0.2, val_size=0.1, random_state=42):
+        # Step 1: Get unique IDs
+        unique_ids = self.X[self.id_col].unique()
+
+        # Step 2: Split IDs
+        train_ids, temp_ids = train_test_split(unique_ids, test_size=(test_size + val_size), random_state=42)
+        val_ids, test_ids = train_test_split(temp_ids, test_size=test_size / (test_size + val_size), random_state=42)
+
+        self.train_ids = np.sort(train_ids)
+        self.val_ids = np.sort(val_ids)
+        self.test_ids = np.sort(test_ids)
+
+        # Step 3: Subset dataframe based on IDs
+        self.train_indices = self.X[self.X['id'].isin(self.train_ids)].index
+        self.val_indices = self.X[self.X['id'].isin(self.val_ids)].index
+        self.test_indices = self.X[self.X['id'].isin(self.test_ids)].index
+
+        self.X_train = self.X.loc[self.train_indices].drop(columns=[self.id_col])
+        self.y_train = self.y.loc[self.train_indices]
+
+        self.X_val = self.X.loc[self.val_indices].drop(columns=[self.id_col])
+        self.y_val = self.y.loc[self.val_indices]
+
+        if create_test:
+            self.X_test = self.X.loc[self.test_indices].drop(columns=[self.id_col])
+            self.y_test = self.y.loc[self.test_indices]
+        
+        # Step 4: Scale the data
+        self.scaler_X = StandardScaler()
+        self.X_train = pd.DataFrame(self.scaler_X.fit_transform(self.X_train), columns=self.scaler_X.feature_names_in_)
+        self.X_mean = self.scaler_X.mean_
+        self.X_std = self.scaler_X.scale_
+
+        self.X_val = pd.DataFrame(self.scaler_X.transform(self.X_val), columns=self.scaler_X.feature_names_in_)
+        if create_test:
+            self.X_test = pd.DataFrame(self.scaler_X.transform(self.X_test), columns=self.scaler_X.feature_names_in_)
+
+        self.scaler_y = StandardScaler()
+        self.y_train = pd.Series(self.scaler_y.fit_transform(self.y_train.values.reshape(-1, 1)).ravel(), name=self.y.name)
+        self.y_mean = self.scaler_y.mean_
+        self.y_std = self.scaler_y.scale_
+
+        self.y_val = pd.Series(self.scaler_y.transform(self.y_val.values.reshape(-1, 1)).ravel(), name=self.y.name)
+        if create_test:
+            self.y_test = pd.Series(self.scaler_y.transform(self.y_test.values.reshape(-1, 1)).ravel(), name=self.y.name)
+        
+
     def set_data_partitions(self, X_train, y_train, X_val, y_val, X_test=None, y_test=None):
         '''
         Sets the data partitions directly.
