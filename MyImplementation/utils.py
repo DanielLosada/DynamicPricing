@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from torch.utils.data import Dataset
 from pyomo.environ import *
@@ -283,3 +284,31 @@ def const_embed(model, opt_model, constaints, outcome, n_scenarios = 1, n_preds=
             for n in range(n_preds):
                 for w in range(1, n_scenarios + 1):
                     opt_model.add_component(outcome + '_pred' + str(n) + '_sce' + str(w), Constraint(rule=opt_model.y[outcome, n, w] == opt_model.y[outcome, n,'mean']*model.y_std + model.y_mean))
+
+
+def plot_mean_sd(df, id_col='id', price_col='price', id=1, save_path=None):
+    """
+    Plot the mean and standard deviation of prices for each ID.
+    Optionally save the plot if a save_path is provided.
+    """
+    df = df[df[id_col] == id]
+    plt.figure(figsize=(10, 4))
+
+    plt.subplot(1, 2, 1)
+    plt.scatter(df[price_col], df['true_mean'], alpha=0.3)
+    plt.xlabel('Price')
+    plt.ylabel('True Mean')
+    plt.title('Price vs True Mean')
+
+    plt.subplot(1, 2, 2)
+    plt.scatter(df[price_col], df['true_std'], alpha=0.3, color='orange')
+    plt.xlabel('Price')
+    plt.ylabel('True Std')
+    plt.title('Price vs True Std')
+
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path)
+
+    plt.show()
