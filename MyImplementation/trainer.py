@@ -99,8 +99,8 @@ class Trainer():
         unique_ids = self.X[self.id_col].unique()
 
         # Step 2: Split IDs
-        train_ids, temp_ids = train_test_split(unique_ids, test_size=(test_size + val_size), random_state=42)
-        val_ids, test_ids = train_test_split(temp_ids, test_size=test_size / (test_size + val_size), random_state=42)
+        train_ids, temp_ids = train_test_split(unique_ids, test_size=(test_size + val_size), random_state=random_state)
+        val_ids, test_ids = train_test_split(temp_ids, test_size=test_size / (test_size + val_size), random_state=random_state)
 
         self.train_ids = np.sort(train_ids)
         self.val_ids = np.sort(val_ids)
@@ -139,7 +139,64 @@ class Trainer():
         self.y_val = pd.Series(self.scaler_y.transform(self.y_val.values.reshape(-1, 1)).ravel(), name=self.y.name)
         if create_test:
             self.y_test = pd.Series(self.scaler_y.transform(self.y_test.values.reshape(-1, 1)).ravel(), name=self.y.name)
-        
+    
+    def create_temporal_partitions_by_id(self, create_test=True, test_size=0.2, val_size=0.1):
+        train_indices = []
+        val_indices = []
+        test_indices = []
+
+        # Loop through each unique ID
+        for uid in self.X[self.id_col].unique():
+            df_id = self.X[self.X[self.id_col] == uid]
+            idx = df_id.index.tolist()
+
+            # Assume data is ordered from newest to oldest, so we reverse to oldest to newest
+            #idx = idx[::-1]
+
+            n = len(idx)
+            n_test = int(n * test_size)
+            n_val = int(n * val_size)
+            n_train = n - n_val - n_test
+
+            train_indices.extend(idx[:n_train])
+            val_indices.extend(idx[n_train:n_train + n_val])
+            test_indices.extend(idx[n_train + n_val:])
+
+        self.train_indices = train_indices
+        self.val_indices = val_indices
+        self.test_indices = test_indices
+
+        # Drop ID column for training
+        self.X_train = self.X.loc[self.train_indices].drop(columns=[self.id_col])
+        self.y_train = self.y.loc[self.train_indices]
+        print("self.X_train: ", self.X_train)
+
+        self.X_val = self.X.loc[self.val_indices].drop(columns=[self.id_col])
+        self.y_val = self.y.loc[self.val_indices]
+
+        if create_test:
+            self.X_test = self.X.loc[self.test_indices].drop(columns=[self.id_col])
+            self.y_test = self.y.loc[self.test_indices]
+
+        # Scale X
+        self.scaler_X = StandardScaler()
+        self.X_train = pd.DataFrame(self.scaler_X.fit_transform(self.X_train), columns=self.scaler_X.feature_names_in_)
+        self.X_mean = self.scaler_X.mean_
+        self.X_std = self.scaler_X.scale_
+
+        self.X_val = pd.DataFrame(self.scaler_X.transform(self.X_val), columns=self.scaler_X.feature_names_in_)
+        if create_test:
+            self.X_test = pd.DataFrame(self.scaler_X.transform(self.X_test), columns=self.scaler_X.feature_names_in_)
+
+        # Scale y
+        self.scaler_y = StandardScaler()
+        self.y_train = pd.Series(self.scaler_y.fit_transform(self.y_train.values.reshape(-1, 1)).ravel(), name=self.y.name)
+        self.y_mean = self.scaler_y.mean_
+        self.y_std = self.scaler_y.scale_
+
+        self.y_val = pd.Series(self.scaler_y.transform(self.y_val.values.reshape(-1, 1)).ravel(), name=self.y.name)
+        if create_test:
+            self.y_test = pd.Series(self.scaler_y.transform(self.y_test.values.reshape(-1, 1)).ravel(), name=self.y.name)
 
     def set_data_partitions(self, X_train, y_train, X_val, y_val, X_test=None, y_test=None):
         '''
