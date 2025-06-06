@@ -36,7 +36,7 @@ class distModel(nn.Module):
             x = self.relu(hidden_layer(x))
             x = self.dropout(x)
         mean = self.output_mean_layer(x)
-        sd = self.relu(self.output_sd_layer(x)) # Ensure variance is non-negative, can still be 0. ReLU is linear.
-        #sd = self.relu(self.output_sd_layer(x)) + 1e-6 # Ensure variance is positive, can't be 0. ReLU is linear.
+        sd = self.relu(self.output_sd_layer(x)) # Ensure variance is non-negative, can still be 0.
+        #sd = self.relu(self.output_sd_layer(x)) + 1e-6 # Ensure variance is positive, can't be 0.
         #sd = self.output_sd_layer(x)
         return mean, sd
