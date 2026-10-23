@@ -1,3 +1,4 @@
+# Includes code copied and adapted from https://github.com/antonioalcantaramata/DistCL/tree/main
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -11,18 +12,6 @@ from pyomo.environ import *
 
 np.random.seed(42)
 torch.manual_seed(1)
-
-def load_case_study_data():
-    data = pd.read_csv('../DistCL_code/data_house_japan/data_clean.csv', index_col=0)
-    data.index = pd.to_datetime(data.index)
-
-    y = data['demand']
-    X = data.drop(['demand'], axis=1, inplace=False)
-
-    val_ind = X.index[(X.index >= pd.to_datetime('2018-11-01')) & (X.index < pd.to_datetime('2018-12-01'))]
-    test_ind = X.index[X.index >= pd.to_datetime('2018-12-01')]
-
-    return X, y, val_ind, test_ind
 
 '''def generate_simple_synthetic_data(n_samples=1000, seed=42):
         np.random.seed(seed)
@@ -140,6 +129,8 @@ def generate_data_by_ids(n_ids=100, n_prices_per_id=10, seed=42, k=0.35):
     df = pd.DataFrame(data)
     return df
 
+# Copied from DistCL, utils.py: extract_layer.
+# Source: https://github.com/antonioalcantaramata/DistCL/tree/main
 def extract_layer(weight, bias, l):
         df_sub = pd.DataFrame(weight[l]).add_prefix('node_')
         df_sub['intercept'] = bias[l]
@@ -147,6 +138,8 @@ def extract_layer(weight, bias, l):
         df_sub['node'] = range(len(df_sub))
         return df_sub
 
+# Copied from DistCL, utils.py: constraint_extrapolation_MLP.
+# Source: https://github.com/antonioalcantaramata/DistCL/tree/main
 def constraint_extrapolation_MLP(weight, bias, names):
     n_layers = len(names)
     constraints = pd.concat([extract_layer(weight, bias, l) for l in range(n_layers)],axis=0)
@@ -189,6 +182,9 @@ class PandasDataset(Dataset):
             return x, y
         return x
 
+# Adapted from DistCL, utils.py: TabularDataset.
+# Modification: __getitem__ returns [features, target] instead of [target, features].
+# Source: https://github.com/antonioalcantaramata/DistCL/tree/main
 class TabularDataset(Dataset):
     def __init__(self, X, y):
         """
@@ -214,6 +210,10 @@ class TabularDataset(Dataset):
 
 
 
+# Adapted from DistCL, distcl.py: distcl.const_embed.
+# Modification: accepts the trained model and prediction count as arguments
+# instead of accessing them through the original distcl instance.
+# Source: https://github.com/antonioalcantaramata/DistCL/tree/main
 def const_embed(model, opt_model, constaints, outcome, n_scenarios = 1, n_preds=1, deterministic = False):
         '''
         This function embdeds the fitted prediction model within the optimization problem.

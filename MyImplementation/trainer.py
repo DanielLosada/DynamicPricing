@@ -38,6 +38,9 @@ class Trainer():
         # Define criterion: https://pytorch.org/docs/stable/generated/torch.nn.GaussianNLLLoss.html
         self.criterion = nn.GaussianNLLLoss()
 
+    # Scaling adapted from DistCL, distcl.py: distcl.__init__.
+    # Modification: separate X/y scalers and configurable sklearn partitions.
+    # Source: https://github.com/antonioalcantaramata/DistCL/tree/main
     def create_data_partitions(self, create_test=True, test_size=0.2, val_size=0.1, random_state=42):
         '''
         Splits self.X and self.y into train, validation, and optionally test sets.
@@ -94,6 +97,9 @@ class Trainer():
         if create_test:
             self.y_test = pd.Series(self.scaler_y.transform(self.y_test.values.reshape(-1, 1)).ravel(), name=self.y.name)
 
+    # Scaling adapted from DistCL, distcl.py: distcl.__init__.
+    # Modification: split by ID and maintain separate X/y scalers.
+    # Source: https://github.com/antonioalcantaramata/DistCL/tree/main
     def create_data_partitions_by_id(self, create_test=True, test_size=0.2, val_size=0.1, random_state=42):
         # Step 1: Get unique IDs
         unique_ids = self.X[self.id_col].unique()
@@ -140,6 +146,9 @@ class Trainer():
         if create_test:
             self.y_test = pd.Series(self.scaler_y.transform(self.y_test.values.reshape(-1, 1)).ravel(), name=self.y.name)
     
+    # Scaling adapted from DistCL, distcl.py: distcl.__init__.
+    # Modification: split chronologically within each ID and use separate scalers.
+    # Source: https://github.com/antonioalcantaramata/DistCL/tree/main
     def create_temporal_partitions_by_id(self, create_test=True, test_size=0.2, val_size=0.1):
         train_indices = []
         val_indices = []
@@ -198,6 +207,9 @@ class Trainer():
         if create_test:
             self.y_test = pd.Series(self.scaler_y.transform(self.y_test.values.reshape(-1, 1)).ravel(), name=self.y.name)
 
+    # Scaling adapted from DistCL, distcl.py: distcl.__init__.
+    # Modification: accept explicit partitions and optional test data.
+    # Source: https://github.com/antonioalcantaramata/DistCL/tree/main
     def set_data_partitions(self, X_train, y_train, X_val, y_val, X_test=None, y_test=None):
         '''
         Sets the data partitions directly.
@@ -239,6 +251,10 @@ class Trainer():
         
 
             
+    # Adapted from DistCL, distnn.py: qdnn.train (training/validation loop).
+    # Modifications: configurable training, PandasDataset, averaged losses,
+    # early stopping, and a configurable checkpoint path.
+    # Source: https://github.com/antonioalcantaramata/DistCL/tree/main
     def train(self):
         torch.cuda.empty_cache()
 
@@ -315,6 +331,9 @@ class Trainer():
 
         return best_loss
 
+    # Adapted from the test-evaluation block in DistCL, distnn.py: qdnn.train.
+    # Modification: a separate method that reports averaged Gaussian NLL.
+    # Source: https://github.com/antonioalcantaramata/DistCL/tree/main
     def test(self):
         test_ds = PandasDataset(self.X_test, self.y_test)
         test_dl = DataLoader(test_ds, batch_size=len(test_ds)) # self.config['batchsize']?
@@ -333,6 +352,10 @@ class Trainer():
         
         print(f'Test Loss: {test_loss.avg:.4f}')
     
+    # Adapted from the inference block in DistCL, distnn.py: qdnn.train.
+    # Modifications: separate inference method, optional input scaling,
+    # tensor output, and conversion back to the original target scale.
+    # Source: https://github.com/antonioalcantaramata/DistCL/tree/main
     def predict(self, X, return_tensor=False, unscale=False, scale_data=False):
         self.model.load_state_dict(torch.load(self.path_model))
         self.model.eval()
@@ -362,6 +385,9 @@ class Trainer():
         
         return mean_pred, sd_pred
     
+    # Adapted from DistCL, distcl.py: distcl.constraint_build.
+    # Modification: load the checkpoint and use self.model instead of a model argument.
+    # Source: https://github.com/antonioalcantaramata/DistCL/tree/main
     def constraint_build(self):
         self.model.load_state_dict(torch.load(self.path_model))
         weight_names = []

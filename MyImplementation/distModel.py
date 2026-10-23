@@ -1,7 +1,12 @@
 import torch.nn as nn
 
-# Model definition
+# Adapted from DistCL, utils.py: DistFCNN.
+# Modifications: explicit input layer, ModuleList hidden layers, shared Dropout
+# module, and ReLU as a module rather than a functional call.
+# Source: https://github.com/antonioalcantaramata/DistCL/tree/main
 class distModel(nn.Module):
+    # Adapted from DistCL, utils.py: DistFCNN.__init__; see class-level changes.
+    # Source: https://github.com/antonioalcantaramata/DistCL/tree/main
     def __init__(self, input_size, hidden_layers, hidden_size, drop):
         super().__init__() # Call the parent class (nn.Module) constructor.
         self.input_size = input_size
@@ -27,6 +32,8 @@ class distModel(nn.Module):
         # Define the dropout layer
         self.dropout = nn.Dropout(self.drop)
 
+    # Adapted from DistCL, utils.py: DistFCNN.forward; applies the explicit input layer.
+    # Source: https://github.com/antonioalcantaramata/DistCL/tree/main
     def forward(self, x):
         # Define the forward pass
         x = self.relu(self.input_layer(x))

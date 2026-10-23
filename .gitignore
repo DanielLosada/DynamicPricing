@@ -1,0 +1,19 @@
+# Python and notebooks
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# Generated models and solver scratch files
+MyImplementation/models/
+*.lp
+*.mps
+*.sol
+gurobi.log
+
+# Local editor / OS files
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
