@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import scipy.stats as stats
 import numpy as np
 
-from utils import PandasDataset, AverageMeter, constraint_extrapolation_MLP, TabularDataset
+from utils import PandasDataset, AverageMeter, constraint_extrapolation_MLP
 from distModel import distModel
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -28,13 +28,12 @@ class Trainer():
 
         self.config = config
 
-        # Definde the model
+        # Define the model
         if id_col is not None:
             self.id_col = id_col
             self.model = distModel(input_size=self.X.shape[1] -1, hidden_layers=self.config['hidden_layers'], hidden_size=self.config['hidden_size'], drop=self.config['drop']).to(self.device)
         else:
             self.model = distModel(input_size=self.X.shape[1], hidden_layers=self.config['hidden_layers'], hidden_size=self.config['hidden_size'], drop=self.config['drop']).to(self.device)
-        #self.model = DistFCNN(input_size=self.X.shape[1], output_size=2, hidden_layers=self.config['hidden_layers'], hidden_size=self.config['hidden_size'], drop=self.config['drop']).to(self.device)
         # Define criterion: https://pytorch.org/docs/stable/generated/torch.nn.GaussianNLLLoss.html
         self.criterion = nn.GaussianNLLLoss()
 
@@ -159,8 +158,7 @@ class Trainer():
             df_id = self.X[self.X[self.id_col] == uid]
             idx = df_id.index.tolist()
 
-            # Assume data is ordered from newest to oldest, so we reverse to oldest to newest
-            #idx = idx[::-1]
+            # Preserve the existing observation order within each client.
 
             n = len(idx)
             n_test = int(n * test_size)
@@ -248,9 +246,7 @@ class Trainer():
         self.y_val = pd.DataFrame(scaler.transform(self.y_val.values.reshape(-1, 1)), columns = [self.y.name])
         if y_test is not None:
             self.y_test = pd.DataFrame(scaler.transform(self.y_test.values.reshape(-1, 1)), columns = [self.y.name])
-        
 
-            
     # Adapted from DistCL, distnn.py: qdnn.train (training/validation loop).
     # Modifications: configurable training, PandasDataset, averaged losses,
     # early stopping, and a configurable checkpoint path.
@@ -261,25 +257,8 @@ class Trainer():
         train_ds = PandasDataset(self.X_train, self.y_train)
         val_ds = PandasDataset(self.X_val, self.y_val)
 
-        #train_ds = TabularDataset(self.X_train, self.y_train)
-        #val_ds = TabularDataset(self.X_val, self.y_val)
-
-        '''pd_ds = PandasDataset(self.X_train, self.y_train)
-        tab_ds = TabularDataset(self.X_train, self.y_train)
-        pd_x, pd_y = pd_ds[0]
-        tab_x, tab_y = tab_ds[0]
-
-        print("PandasDataset:")
-        print(type(pd_x), pd_x.shape, pd_x.dtype)
-        print(type(pd_y), pd_y.shape, pd_y.dtype)
-
-        print("TabularDataset:")
-        print(type(tab_x), tab_x.shape, tab_x.dtype)
-        print(type(tab_y), tab_y.shape, tab_y.dtype)'''
-
-        
         train_dl = DataLoader(train_ds, batch_size = self.config['batchsize'], shuffle=True)
-        val_dl = DataLoader(val_ds, batch_size=len(val_ds)) # self.config['batchsize']?
+        val_dl = DataLoader(val_ds, batch_size=len(val_ds))
 
         iters = self.config['iters']
         patience = self.config.get('patience', 10)
@@ -296,10 +275,7 @@ class Trainer():
                 x, y = x.to(self.device), y.to(self.device)
                 optimizer.zero_grad()
                 mean, sd = self.model(x)
-                #print("sd: ", len(sd))
-                #mean, var = self.model(x)
                 loss = self.criterion(mean, y, sd**2)
-                #loss = self.criterion(mean, y, var)
                 loss.backward()
                 optimizer.step()
                 self.train_loss.update(loss.item(), x.size(0))
@@ -318,7 +294,6 @@ class Trainer():
                 print(f'Validation loss improved from {best_loss:.4f} to {val_loss.avg:.4f} in epoch {epoch+1}. Saving model...')
                 no_improvement = 0
                 best_loss = val_loss.avg
-                #self.best_model = self.model.state_dict() # copy.deepcopy(self.model.state_dict())
                 torch.save(self.model.state_dict(), self.path_model)
             else:
                 no_improvement += 1
@@ -336,7 +311,7 @@ class Trainer():
     # Source: https://github.com/antonioalcantaramata/DistCL/tree/main
     def test(self):
         test_ds = PandasDataset(self.X_test, self.y_test)
-        test_dl = DataLoader(test_ds, batch_size=len(test_ds)) # self.config['batchsize']?
+        test_dl = DataLoader(test_ds, batch_size=len(test_ds))
 
         self.model.load_state_dict(torch.load(self.path_model))
         self.model.eval()
@@ -365,7 +340,7 @@ class Trainer():
             X = pd.DataFrame(self.scaler_X.transform(X), columns=self.scaler_X.feature_names_in_)
         
         pred_ds = PandasDataset(X)
-        pred_dl = DataLoader(pred_ds, batch_size=len(pred_ds)) # self.config['batchsize']?
+        pred_dl = DataLoader(pred_ds, batch_size=len(pred_ds))
 
         with torch.no_grad():
             for i, x in enumerate(pred_dl):

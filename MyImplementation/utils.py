@@ -9,34 +9,8 @@ import matplotlib.pyplot as plt
 from torch.utils.data import Dataset
 from pyomo.environ import *
 
-
 np.random.seed(42)
 torch.manual_seed(1)
-
-'''def generate_simple_synthetic_data(n_samples=1000, seed=42):
-        np.random.seed(seed)
-
-        # Contextual features
-        x1 = np.random.uniform(0, 1, size=n_samples)   # e.g., income level normalized [0, 1]
-        x2 = np.random.uniform(0, 1, size=n_samples)   # e.g., brand loyalty normalized [0, 1]
-
-        # Price feature (higher price usually decreases demand)
-        price = np.random.uniform(1, 10, size=n_samples)  # price between $1 and $10
-
-        # Define true mean (nonlinear relationship)
-        true_mean = (5 * x1 + 3 * x2) / (1 + 0.5 * price)  # demand decreases with higher price
-
-        # Define true std (slightly depends on features)
-        true_std = 0.2 + 0.3 * np.abs(x1 - x2) + 0.05 * (price / 10)  # more price variation adds more noise
-
-        # Sample y from N(mean, std)
-        y = np.random.normal(loc=true_mean, scale=true_std)
-
-        # Package into dataframe
-        X = pd.DataFrame({'x1': x1, 'x2': x2, 'price': price})
-        y = pd.Series(y, name='y')
-
-        return X, y, true_mean, true_std'''
 
 def generate_simple_synthetic_data(n_samples=1000, seed=42):
     np.random.seed(seed)
@@ -64,10 +38,9 @@ def generate_simple_synthetic_data(n_samples=1000, seed=42):
     base_std = std_min + (std_peak - std_min) * np.exp(-((price - 17)**2) / (2 * width**2))
     true_std = np.where(valid_price_mask, base_std, 0)
 
-    # Sample demand, clip, round
+    # Sample demand and clip negative values
     y = np.random.normal(loc=true_mean, scale=true_std)
     y = np.maximum(0, y)
-    #y = np.round(y).astype(int)
 
     # Package
     X = pd.DataFrame({'x1': x1, 'x2': x2, 'price': price})
@@ -208,8 +181,6 @@ class TabularDataset(Dataset):
         """
         return [self.X[idx], self.y[idx]]
 
-
-
 # Adapted from DistCL, distcl.py: distcl.const_embed.
 # Modification: accepts the trained model and prediction count as arguments
 # instead of accessing them through the original distcl instance.
@@ -220,10 +191,7 @@ def const_embed(model, opt_model, constaints, outcome, n_scenarios = 1, n_preds=
         Expecting a defined optimization model "opt_model", constraint dataframe "constraints",
         a name for an "outcome", and the number of scenarios to generate.
         '''
-        
-        # Predefining variable y
-        #opt_model.y = Var(Any, dense=False, domain=Reals)
-        
+
         M_l=-1e3
         M_u=1e3
         opt_model.v = Var(Any, dense=False, domain=NonNegativeReals)
@@ -233,12 +201,10 @@ def const_embed(model, opt_model, constaints, outcome, n_scenarios = 1, n_preds=
             max_layer = max(constaints['layer'])
             nodes_input = range(len(model.X_train.columns))
             v_input = [(opt_model.x[name,n]-model.X_mean[i])/model.X_std[i] for i,name in enumerate(model.X_train.columns)] # If data is not scaled
-            #v_input = [opt_model.x[name, n] for name in model.X_train.columns] # If data is scaled
 
             for l in range(max_layer):
                 df_layer = constaints.query('layer == %d' % l)
                 max_nodes = [k for k in df_layer.columns if 'node_' in k]
-                # coeffs_layer = np.array(df_layer.iloc[:, range(len(max_nodes))].dropna(axis=1))
                 coeffs_layer = np.array(df_layer.loc[:, max_nodes].dropna(axis=1))
                 intercepts_layer = np.array(df_layer['intercept'])
                 nodes = df_layer['node']
@@ -269,8 +235,7 @@ def const_embed(model, opt_model, constaints, outcome, n_scenarios = 1, n_preds=
                     ## Prepare nodes_input for next layer
                     nodes_input = nodes
                     v_input = v_pos_list
-        
-        
+
         if deterministic == False:
             np.random.seed(0)
             z_vals = np.random.normal(size=n_scenarios)
@@ -284,7 +249,6 @@ def const_embed(model, opt_model, constaints, outcome, n_scenarios = 1, n_preds=
             for n in range(n_preds):
                 for w in range(1, n_scenarios + 1):
                     opt_model.add_component(outcome + '_pred' + str(n) + '_sce' + str(w), Constraint(rule=opt_model.y[outcome, n, w] == opt_model.y[outcome, n,'mean']*model.y_std + model.y_mean))
-
 
 def plot_mean_sd(df, id_col='id', price_col='price', id=1, save_path=None):
     """
